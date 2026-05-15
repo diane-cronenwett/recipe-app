@@ -1,10 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -15,6 +10,21 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Check environment variables exist
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+    console.error('Missing Supabase credentials');
+    return res.status(500).json({ 
+      error: 'Server configuration error: missing credentials',
+      hasUrl: !!process.env.SUPABASE_URL,
+      hasKey: !!process.env.SUPABASE_KEY
+    });
+  }
+
+  const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY
+  );
+
   try {
     if (req.method === 'GET') {
       const { data: recipes, error } = await supabase
@@ -22,7 +32,10 @@ export default async function handler(req, res) {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        return res.status(500).json({ error: error.message, details: error });
+      }
 
       const recipesWithIngredients = await Promise.all(
         recipes.map(async (recipe) => {
@@ -30,7 +43,7 @@ export default async function handler(req, res) {
             .from('recipe_ingredients')
             .select('name, amount, unit')
             .eq('recipe_id', recipe.id);
-          return { ...recipe, ingredients };
+          return { ...recipe, ingredients: ingredients || [] };
         })
       );
 
@@ -50,7 +63,10 @@ export default async function handler(req, res) {
         .select()
         .single();
 
-      if (recipeError) throw recipeError;
+      if (recipeError) {
+        console.error('Insert recipe error:', recipeError);
+        return res.status(500).json({ error: recipeError.message, details: recipeError });
+      }
 
       if (ingredients && ingredients.length > 0) {
         const ingsToInsert = ingredients
@@ -62,19 +78,27 @@ export default async function handler(req, res) {
             unit: ing.unit || null
           }));
 
-        const { error: ingError } = await supabase
-          .from('recipe_ingredients')
-          .insert(ingsToInsert);
+        if (ingsToInsert.length > 0) {
+          const { error: ingError } = await supabase
+            .from('recipe_ingredients')
+            .insert(ingsToInsert);
 
-        if (ingError) throw ingError;
+          if (ingError) {
+            console.error('Insert ingredients error:', ingError);
+            return res.status(500).json({ error: ingError.message, details: ingError });
+          }
+        }
       }
 
-      return res.status(200).json(recipe);
+      return res.status(200).json({ ...recipe, ingredients: ingredients || [] });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('Error:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('Handler error:', error);
+    return res.status(500).json({ 
+      error: error.message,
+      stack: error.stack
+    });
   }
 }
