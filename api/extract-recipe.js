@@ -35,7 +35,7 @@ export default async function handler(req, res) {
 
     const imageData = await fs.readFile(file.filepath);
     const base64Image = imageData.toString('base64');
-    const mimeType = 'image/jpeg';
+    const mimeType = file.mimetype || 'image/jpeg';
 
     const message = await client.messages.create({
       model: 'claude-opus-4-1-20250805',
